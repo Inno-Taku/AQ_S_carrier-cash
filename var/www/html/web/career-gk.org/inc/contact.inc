@@ -24,6 +24,71 @@ if (!empty($form["identification2"])) {
     $_SESSION['identification2'] = $form["identification2"];
 }
 
+if (!function_exists('fetchRefusedDuplicateUserMatchFromRemoteEndpoint')) {
+    function fetchRefusedDuplicateUserMatchFromRemoteEndpoint($endpointUrl, $email, $tel)
+    {
+        global $sharedPassword_userSorry;
+        $postFields = http_build_query(array(
+            'email' => (string)$email,
+            'tel' => (string)$tel,
+            'password' => $sharedPassword_userSorry,
+        ));
+
+        if (!function_exists('curl_init')) {
+            return null;
+        }
+
+        $ch = curl_init($endpointUrl);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $postFields);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 3);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+
+        $response = curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($response === false || $response === '' || $httpCode !== 200) {
+            return null;
+        }
+
+        $decoded = json_decode($response, true);
+        if (!is_array($decoded)) {
+            $normalized = strtolower(trim($response));
+            return ($normalized === 'true' || $normalized === '1') ? true : null;
+        }
+
+        if (!empty($decoded['result'])) {
+            return !empty($decoded['uid']) ? $decoded['uid'] : true;
+        }
+
+        return null;
+    }
+}
+
+if (!function_exists('findRefusedDuplicateUserMatchFromRemoteServers')) {
+    function findRefusedDuplicateUserMatchFromRemoteServers($email, $tel)
+    {
+        $endpointUrls = array(
+            'https://access.aq-azalea.com/userfile/user_sorry/user_sorry.php',
+            'https://access.aohana8.com/userfile/user_sorry/user_sorry.php',
+            'https://access.gerbera8.com/userfile/user_sorry/user_sorry.php',
+        );
+
+        foreach ($endpointUrls as $endpointUrl) {
+            $remoteMatch = fetchRefusedDuplicateUserMatchFromRemoteEndpoint($endpointUrl, $email, $tel);
+            if ($remoteMatch !== null) {
+                return $remoteMatch;
+            }
+        }
+
+        return null;
+    }
+}
+
 
 // 申込ボタンが押されたとき
 if ($action) {
@@ -299,6 +364,16 @@ if ($action) {
 
         // 申込
     } elseif ($action == 2) {
+        $email = isset($form["email"]) ? $form["email"] : '';
+        $tel = isset($form["tel3"]) ? $form["tel3"] : '';
+
+        $refusedDuplicateUid = findRefusedDuplicateUserMatchFromRemoteServers($email, $tel);
+        if ($refusedDuplicateUid !== null) {
+            unset($_SESSION['errorMessageList']);
+            unset($_SESSION['formValueList']);
+            header('Location: ./contactCompletionSorry.php');
+            exit();
+        }
 
         //メール添付用
         $attachment = array();
